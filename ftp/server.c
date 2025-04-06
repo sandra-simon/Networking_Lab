@@ -1,106 +1,102 @@
+// server.c
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/types.h>
-#include <sys/socket.h>
+#include <sys/socket.h>     // For socket(), bind(), accept(), recv()
 #include <string.h>
-#include <unistd.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-
-#define PORT 3621
-#define BUFFER_SIZE 4096
+#include <unistd.h>         // For close()
+#include <netinet/in.h>     // For sockaddr_in
+#include <arpa/inet.h>      // For inet_addr()
 
 void receiveFile(int newSock) {
-    char buffer[BUFFER_SIZE];
-    int bytesRead;
-    FILE *fp = fopen("output.txt", "w");
+    char buffer[4098];
+    int bytesRead = 0;
+    int i, j;
+    char temp;
+    FILE *fp;
 
+    fp = fopen("output.txt", "w");      // File to save reversed content
     if (fp == NULL) {
-        perror("File open error");
+        printf("Error in Opening File\n");
         return;
     }
 
-    printf("Receiving file...\n");
-
-    while ((bytesRead = recv(newSock, buffer, BUFFER_SIZE, 0)) > 0) {
-        fwrite(buffer, sizeof(char), bytesRead, fp);
+    // Receive data from client
+    bytesRead = recv(newSock, buffer, sizeof(buffer) - 1, 0);
+    if (bytesRead <= 0) {
+        printf("Error receiving file or empty file.\n");
+        fclose(fp);
+        return;
     }
 
-    fclose(fp);
+    buffer[bytesRead] = '\0';      // Null-terminate the received string
 
-    printf("File received successfully.\n");
-
-    // Now reverse the file contents
-    FILE *rfp = fopen("output.txt", "r");
-    fseek(rfp, 0, SEEK_END);
-    long len = ftell(rfp);
-    fseek(rfp, 0, SEEK_SET);
-
-    char *content = malloc(len + 1);
-    fread(content, 1, len, rfp);
-    content[len] = '\0';
-
-    fclose(rfp);
-
-    // Reverse
-    for (int i = 0, j = len - 1; i < j; i++, j--) {
-        char temp = content[i];
-        content[i] = content[j];
-        content[j] = temp;
+    // Reverse the string using two-pointer method
+    i = 0;
+    j = strlen(buffer) - 1;
+    while (i < j) {
+        temp = buffer[j];
+        buffer[j] = buffer[i];
+        buffer[i] = temp;
+        i++;
+        j--;
     }
 
-    // Write reversed to file
-    FILE *wfp = fopen("output.txt", "w");
-    fwrite(content, 1, len, wfp);
-    fclose(wfp);
-
-    printf("Reversed File Contents:\n%s\n", content);
-
-    free(content);
+    // Write reversed content to file
+    fprintf(fp, "%s", buffer);
+    printf("File Received and Reversed Successfully.\n");
+    printf("Reversed Content: %s\n", buffer);
+    fclose(fp);      // Close the output file
 }
 
 int main() {
     struct sockaddr_in servAddr;
-    int serverSock, newSock;
-    socklen_t addrSize;
     struct sockaddr_storage store;
+    socklen_t addrSize;
+    int server, newSock;
 
-    serverSock = socket(AF_INET, SOCK_STREAM, 0);
-    if (serverSock < 0) {
+    // Create a TCP socket
+    server = socket(AF_INET, SOCK_STREAM, 0);
+    if (server < 0) {
         perror("Socket creation failed");
-        exit(1);
+        return -1;
     }
+    printf("Socket created.\n");
 
-    servAddr.sin_family = AF_INET;
-    servAddr.sin_port = htons(PORT);
-    servAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    // Server address setup
+    servAddr.sin_family = AF_INET;               // IPv4
+    servAddr.sin_port = htons(3621);             // Port number (3621)
+    servAddr.sin_addr.s_addr = inet_addr("127.0.0.1");  // Bind to localhost
+    memset(servAddr.sin_zero, 0, sizeof(servAddr.sin_zero)); // Padding
 
-    if (bind(serverSock, (struct sockaddr *)&servAddr, sizeof(servAddr)) < 0) {
+    // Bind the socket to the IP and port
+    if (bind(server, (struct sockaddr *)&servAddr, sizeof(servAddr)) < 0) {
         perror("Binding failed");
-        close(serverSock);
-        exit(1);
+        return -1;
     }
+    printf("Binding done.\n");
 
-    if (listen(serverSock, 5) == 0) {
-        printf("Server is listening...\n");
-    } else {
+    // Start listening for connections
+    if (listen(server, 5) < 0) {
         perror("Listen failed");
-        close(serverSock);
-        exit(1);
+        return -1;
     }
+    printf("Server is listening...\n");
 
     addrSize = sizeof(store);
-    newSock = accept(serverSock, (struct sockaddr *)&store, &addrSize);
+
+    // Accept a client connection
+    newSock = accept(server, (struct sockaddr *)&store, &addrSize);
     if (newSock < 0) {
         perror("Accept failed");
-        close(serverSock);
-        exit(1);
+        return -1;
     }
-
     printf("Client connected.\n");
-    receiveFile(newSock);
 
-    close(newSock);
-    close(serverSock);
+    receiveFile(newSock);  // Handle receiving and reversing
+
+    close(newSock);        // Close client socket
+    close(server);         // Close server socket
     return 0;
 }
